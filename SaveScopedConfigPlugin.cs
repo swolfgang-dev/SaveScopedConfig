@@ -194,6 +194,7 @@ namespace WheresWolfgang.SaveScopedConfig
                 buildSettingList.Invoke(manager, null);
             }
 
+            SortConfigManagerCategoryGroups(managerType, manager);
             SaveScopedConfig.RaiseConfigManagerRefreshed();
 
             if (!reopenWindow)
@@ -278,6 +279,221 @@ namespace WheresWolfgang.SaveScopedConfig
             }
 
             return values;
+        }
+
+        internal static void SortConfigManagerCategoryGroups(Type managerType, object manager)
+        {
+            foreach (FieldInfo field in managerType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                object value = field.GetValue(manager);
+                SortPluginSettingsData(value);
+
+                IEnumerable enumerable = value as IEnumerable;
+                if (enumerable == null || value is string)
+                {
+                    continue;
+                }
+
+                foreach (object item in enumerable)
+                {
+                    SortPluginSettingsData(item);
+
+                    object dictionaryValue = GetDictionaryValue(item);
+                    if (dictionaryValue != null)
+                    {
+                        SortPluginSettingsData(dictionaryValue);
+                    }
+                }
+            }
+        }
+
+        private static object GetDictionaryValue(object item)
+        {
+            if (item is DictionaryEntry)
+            {
+                return ((DictionaryEntry)item).Value;
+            }
+
+            if (item == null)
+            {
+                return null;
+            }
+
+            PropertyInfo valueProperty = item.GetType().GetProperty("Value", BindingFlags.Instance | BindingFlags.Public);
+            return valueProperty == null || !valueProperty.CanRead ? null : valueProperty.GetValue(item, null);
+        }
+
+        private static void SortPluginSettingsData(object pluginSettingsData)
+        {
+            if (pluginSettingsData == null)
+            {
+                return;
+            }
+
+            FieldInfo categoriesField = pluginSettingsData.GetType().GetField("Categories", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (categoriesField == null)
+            {
+                return;
+            }
+
+            IList categories = categoriesField.GetValue(pluginSettingsData) as IList;
+            if (categories == null || categories.Count < 2 || categories.IsReadOnly || categories.IsFixedSize)
+            {
+                return;
+            }
+
+            List<CategorySortEntry> sortedCategories = new List<CategorySortEntry>();
+            for (int i = 0; i < categories.Count; i++)
+            {
+                object category = categories[i];
+                sortedCategories.Add(new CategorySortEntry(category, i, GetCategorySortOrder(category)));
+            }
+
+            sortedCategories.Sort(CompareCategorySortEntries);
+
+            for (int i = 0; i < sortedCategories.Count; i++)
+            {
+                categories[i] = sortedCategories[i].Category;
+            }
+        }
+
+        private static int CompareCategorySortEntries(CategorySortEntry left, CategorySortEntry right)
+        {
+            int orderComparison = right.Order.CompareTo(left.Order);
+            return orderComparison != 0 ? orderComparison : left.Index.CompareTo(right.Index);
+        }
+
+        private static int GetCategorySortOrder(object category)
+        {
+            return GetCategoryScopeOrder(category) + GetCategoryOrder(category);
+        }
+
+        private static int GetCategoryScopeOrder(object category)
+        {
+            string name = GetCategoryName(category);
+            if (name == null)
+            {
+                return 0;
+            }
+
+            if (name.StartsWith("Global:", StringComparison.Ordinal))
+            {
+                return 1000000;
+            }
+
+            if (name.StartsWith("Save ", StringComparison.Ordinal))
+            {
+                return 0;
+            }
+
+            return 0;
+        }
+
+        private static string GetCategoryName(object category)
+        {
+            if (category == null)
+            {
+                return null;
+            }
+
+            FieldInfo nameField = category.GetType().GetField("Name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            return nameField == null ? null : nameField.GetValue(category) as string;
+        }
+
+        private static int GetCategoryOrder(object category)
+        {
+            if (category == null)
+            {
+                return int.MinValue;
+            }
+
+            FieldInfo settingsField = category.GetType().GetField("Settings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            IEnumerable settings = settingsField == null ? null : settingsField.GetValue(category) as IEnumerable;
+            if (settings == null)
+            {
+                return int.MinValue;
+            }
+
+            int order = int.MinValue;
+            foreach (object setting in settings)
+            {
+                int? settingOrder = GetSettingOrder(setting);
+                if (settingOrder.HasValue && settingOrder.Value > order)
+                {
+                    order = settingOrder.Value;
+                }
+            }
+
+            return order;
+        }
+
+        private static int? GetSettingOrder(object setting)
+        {
+            if (setting == null)
+            {
+                return null;
+            }
+
+            PropertyInfo orderProperty = setting.GetType().GetProperty("Order", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (orderProperty == null || !orderProperty.CanRead)
+            {
+                return null;
+            }
+
+            object order = orderProperty.GetValue(setting, null);
+            if (order is int)
+            {
+                return (int)order;
+            }
+
+            return null;
+        }
+
+        private sealed class CategorySortEntry
+        {
+            public CategorySortEntry(object category, int index, int order)
+            {
+                Category = category;
+                Index = index;
+                Order = order;
+            }
+
+            public object Category { get; private set; }
+            public int Index { get; private set; }
+            public int Order { get; private set; }
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class ConfigurationManagerCategorySortPatch
+    {
+        private static IEnumerable<MethodBase> TargetMethods()
+        {
+            Type managerType = Type.GetType("ConfigurationManager.ConfigurationManager, ConfigurationManager");
+            if (managerType == null)
+            {
+                yield break;
+            }
+
+            MethodInfo buildSettingList = managerType.GetMethod("BuildSettingList", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (buildSettingList != null)
+            {
+                yield return buildSettingList;
+            }
+
+            MethodInfo buildFilteredSettingList = managerType.GetMethod("BuildFilteredSettingList", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (buildFilteredSettingList != null)
+            {
+                yield return buildFilteredSettingList;
+            }
+        }
+
+        private static void Postfix(object __instance)
+        {
+            if (__instance != null)
+            {
+                SaveScopedConfigPlugin.SortConfigManagerCategoryGroups(__instance.GetType(), __instance);
+            }
         }
     }
 
