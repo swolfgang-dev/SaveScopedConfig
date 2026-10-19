@@ -14,7 +14,7 @@ namespace WheresWolfgang.SaveScopedConfig
     {
         public const string PluginGuid = "whereswolfgang.savescopedconfig";
         public const string PluginName = "Save Scoped Config";
-        public const string PluginVersion = "0.3.1";
+        public const string PluginVersion = "0.3.2";
 
         private static readonly List<ISaveScopedConfigEntry> Entries = new List<ISaveScopedConfigEntry>();
 
@@ -521,11 +521,23 @@ namespace WheresWolfgang.SaveScopedConfig
     [HarmonyPatch(typeof(GameManager), "SetLoadedGameData", new Type[] { typeof(SaveGameData), typeof(int) })]
     internal static class GameManagerSetLoadedGameDataPatch
     {
-        private static void Postfix(SaveGameData saveGameData, int saveSlot)
+        private static void Postfix(GameManager __instance, SaveGameData saveGameData, int saveSlot)
         {
             if (saveGameData != null && saveGameData.playerData != null)
             {
-                SaveScopedConfig.SetActiveSave(saveSlot, saveGameData.playerData.permadeathMode);
+                // Save deserialization may run on the game's async save worker.
+                // Config refresh and consumer callbacks use Unity objects and must run on the game thread.
+                var mode = saveGameData.playerData.permadeathMode;
+                var loadedPlayerData = saveGameData.playerData;
+                CoreLoop.InvokeSafe(() =>
+                {
+                    // A newer load or return to menu can supersede this queued update.
+                    if (__instance != null && __instance.profileID == saveSlot &&
+                        ReferenceEquals(__instance.playerData, loadedPlayerData))
+                    {
+                        SaveScopedConfig.SetActiveSave(saveSlot, mode);
+                    }
+                });
             }
         }
     }
