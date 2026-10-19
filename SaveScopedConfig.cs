@@ -172,12 +172,17 @@ namespace WheresWolfgang.SaveScopedConfig
             return GetModeName(mode);
         }
 
+        private static void ReportSubscriberError(Exception error)
+        {
+            SaveScopedConfigPlugin.Log?.LogError("Save configuration subscriber failed: " + error);
+        }
+
         private static void RaiseActiveSaveChanged()
         {
             Action handler = ActiveSaveChanged;
             if (handler != null)
             {
-                handler();
+                EventDispatch.Invoke(handler, ReportSubscriberError);
             }
         }
 
@@ -186,7 +191,7 @@ namespace WheresWolfgang.SaveScopedConfig
             Action<int> handler = SaveSlotResetToDefaults;
             if (handler != null)
             {
-                handler(saveSlot);
+                EventDispatch.Invoke(handler, saveSlot, ReportSubscriberError);
             }
         }
 
@@ -195,7 +200,7 @@ namespace WheresWolfgang.SaveScopedConfig
             Action handler = ConfigManagerRefreshed;
             if (handler != null)
             {
-                handler();
+                EventDispatch.Invoke(handler, ReportSubscriberError);
             }
         }
     }

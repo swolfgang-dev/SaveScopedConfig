@@ -4,7 +4,7 @@ Save Scoped Config is a small BepInEx helper plugin for Silksong mods that want 
 
 It watches save load, new game, return-to-menu, and save erase events. In Configuration Manager it keeps the mod entry visible, shows only the active save's scoped settings, and refreshes the window when the active save changes.
 
-Current API version: `0.3.1`.
+Current API version: `0.4.0`.
 
 ## Install
 
@@ -246,3 +246,35 @@ SaveScopedConfig.ConfigManagerRefreshed += () =>
 ```
 
 Remember to unsubscribe from events in `OnDestroy` if your plugin can unload or reload.
+
+## Shared UI and compatibility helpers
+
+`ModSettingsUi.BindPanel` adds a wrapped custom Configuration Manager panel. `ExplainEnablement` describes normal acquisition, global overrides, and save overrides without changing their values. A global or save enable remains additive; a false override never revokes normal acquisition.
+
+`PresetLibrary` reads, saves, and deletes bounded case-insensitive named values in one config string. Names and values are URI escaped; malformed rows are ignored. Callers must validate their own preset payload before applying it.
+
+`ModCompatibility.TryPatch` validates required reflected members before Harmony patching. If patching throws, it removes that Harmony owner's patches and returns an unavailable status. A different game version emits a warning rather than disabling otherwise valid APIs. The reference version is 1.0.30000; checks do not prove compatibility with future versions.
+
+Public active-save, reset, and Configuration Manager notification subscribers are invoked independently. A throwing subscriber is logged and does not prevent later subscribers from receiving the notification. This isolation does not suppress failures inside an individual mod's config entry callbacks.
+
+## Tests
+
+```sh
+dotnet run --project Tests/CoreTests.csproj -c Release
+```
+
+These core tests need no game assemblies and cover subscriber isolation and named-preset serialization, validation, capacity, and deletion. The sibling CrestLoadouts `Tests/run.py` provides disposable in-game integration tests for all five mods.
+
+## Build and package
+
+Requires the .NET 8 SDK and a local Silksong installation with BepInEx 5. Run from this repository:
+
+```sh
+python3 build.py --game-dir "/path/to/Hollow Knight Silksong"
+python3 build.py --game-dir "/path/to/Hollow Knight Silksong" --package
+```
+
+`SILKSONG_GAME_DIR` can supply the game directory. Use `--dotnet /path/to/dotnet` for a local SDK.
+Builds go to `bin/Release/netstandard2.1`. Packaging writes `dist/SaveScopedConfig-<version>.zip` with the plugin, README, and SHA-256 checksum; it includes no game assemblies. `--check` validates version metadata without building. Identical inputs produce identical package contents and timestamps. Release metadata excludes Git revision suffixes so checked-in binaries do not identify an earlier source commit.
+
+Builds do not deploy by default. Install the DLL under `BepInEx/plugins/SaveScopedConfig/` after closing the game. On Windows, `build.ps1 -GameDir "C:\path\to\game"` also builds locally; explicit `-Target Plugin` deploys a plugin and `-Target Dev` deploys for ScriptEngine. Do not install both copies.

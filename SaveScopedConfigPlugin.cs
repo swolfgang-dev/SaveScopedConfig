@@ -14,11 +14,12 @@ namespace WheresWolfgang.SaveScopedConfig
     {
         public const string PluginGuid = "whereswolfgang.savescopedconfig";
         public const string PluginName = "Save Scoped Config";
-        public const string PluginVersion = "0.3.2";
+        public const string PluginVersion = "0.4.0";
 
         private static readonly List<ISaveScopedConfigEntry> Entries = new List<ISaveScopedConfigEntry>();
 
         private Harmony harmony;
+        private string compatibilityStatus = "Starting";
         private ConfigEntry<bool> resetSettingsOnDeleteSave;
         private ConfigEntry<string> activeSaveStatus;
         private ConfigEntry<string> steelSoulStatus;
@@ -55,7 +56,10 @@ namespace WheresWolfgang.SaveScopedConfig
             UpdateStatusEntries();
 
             harmony = new Harmony(PluginGuid);
-            harmony.PatchAll(typeof(SaveScopedConfigPlugin).Assembly);
+            ModSettingsUi.BindPanel(Config, "Runtime", () => ModSettingsUi.Label(compatibilityStatus),
+                "Game API and patch status for Save Scoped Config.");
+            ModCompatibility.TryPatch(harmony, typeof(SaveScopedConfigPlugin).Assembly, Logger,
+                out compatibilityStatus, AccessTools.Method(typeof(GameManager), "SetLoadedGameData", new[] { typeof(SaveGameData), typeof(int) }));
             Logger.LogInfo(PluginName + " loaded.");
         }
 
